@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError, HELP, parseCommand } from './commands.js';
+import { HELP, failure, parseCommand } from './commands.js';
 import { read, redact, table } from './client.js';
 
 const args=process.argv.slice(2);
@@ -12,12 +12,13 @@ try {
   const command=parseCommand(args,process.env);
   if(command==='help') process.stdout.write(HELP);
   else {
+    if(command.warning) process.stderr.write(redact(command.warning+'\n',keys));
     const result=await read(command);
     const output=command.format==='table'?table(result):JSON.stringify(result,null,2)+'\n';
     process.stdout.write(redact(output,keys));
   }
 } catch(error) {
-  const known=error instanceof CliError;
-  process.stderr.write(redact((known?error.message:'NETWORK_ERROR: Unexpected request failure')+'\n',keys));
-  process.exitCode=known?error.exitCode:3;
+  const {message,exitCode}=failure(error);
+  process.stderr.write(redact(message+'\n',keys));
+  process.exitCode=exitCode;
 }

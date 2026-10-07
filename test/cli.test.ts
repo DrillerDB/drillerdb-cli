@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
 import { performance } from 'node:perf_hooks';
-import { parseCommand, CliError } from '../src/commands.js';
+import { parseCommand, CliError, failure } from '../src/commands.js';
 import { redact, retryDelay, rateDelay, table } from '../src/client.js';
 
 type Reply={status?:number;body?:unknown;headers?:Record<string,string>;raw?:string};
@@ -178,7 +178,7 @@ test('default partner/public hosts and string equipment IDs match the contract',
   expect(partner.url.href).toBe('https://console.drillerdb.com/api/partner/v1/equipment/rig-A');
   expect(()=>parseCommand(['stats','--base-url','https://example.com?key=hidden'],{})).toThrow(CliError);
 });
-test('keyed commands send the key only to drillerdb.com hosts unless --allow-custom-host',()=>{
+test('keyed commands send the key only to the partner API hosts unless --allow-custom-host',()=>{
   const refused=(args:string[],env:Record<string,string>)=>{
     try {parseCommand(args,env);} catch(error) {
       expect(error).toBeInstanceOf(CliError);expect((error as CliError).exitCode).toBe(2);
@@ -186,15 +186,16 @@ test('keyed commands send the key only to drillerdb.com hosts unless --allow-cus
     }
     throw new Error(`accepted ${args.join(' ')}`);
   };
-  for(const base of ['https://attacker.example.net/x','https://evildrillerdb.com','https://drillerdb.com.evil.example','https://drillerdb.com.'])
+  for(const base of ['https://attacker.example.net/x','https://evildrillerdb.com','https://drillerdb.com.evil.example','https://drillerdb.com.','https://drillerdb.com','https://status.drillerdb.com','https://console.drillerdb.com.evil.example'])
     expect(refused(['projects','list','--api-key',fakeKey,'--base-url',base],{})).toContain('--allow-custom-host');
   expect(refused(['contacts','get','4'],{DRILLERDB_API_KEY:fakeKey,DRILLERDB_BASE_URL:'https://attacker.example.net'})).toContain('attacker.example.net');
-  for(const base of ['https://drillerdb.com','https://app.drillerdb.com/api/v1','https://console.drillerdb.com/api/partner/v1','http://127.0.0.1:9']) {
+  for(const base of ['https://app.drillerdb.com/api/v1','https://console.drillerdb.com/api/partner/v1','https://CONSOLE.drillerdb.com/api/partner/v1','http://127.0.0.1:9']) {
     const command=parseCommand(['projects','list','--base-url',base],{DRILLERDB_API_KEY:fakeKey});
-    if(command==='help')throw new Error('not a command');expect(command.key).toBe(fakeKey);
+    if(command==='help')throw new Error('not a command');expect(command.key).toBe(fakeKey);expect(command.warning).toBeUndefined();
   }
   const custom=parseCommand(['projects','list','--base-url','https://attacker.example.net','--allow-custom-host'],{DRILLERDB_API_KEY:fakeKey});
   if(custom==='help')throw new Error('not a command');expect(custom.url.hostname).toBe('attacker.example.net');
+  expect(custom.warning).toContain('attacker.example.net');expect(custom.warning).not.toContain(fakeKey);
   const keyless=parseCommand(['stats','--base-url','https://example.org'],{DRILLERDB_API_KEY:fakeKey});
   if(keyless==='help')throw new Error('not a command');expect(keyless.key).toBeUndefined();
 });
@@ -207,4 +208,24 @@ test('table output removes terminal control and bidi override characters',()=>{
   const out=table({data:[{'na\x1b]0;x\x07me':'a\x1b[2Jb\u202ec\x9bd\u2066e'}]});
   expect(out).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/);
   expect(out).toContain('a [2Jb c d e');
+});
+test('--allow-custom-host prints a warning to stderr before any request',async()=>{
+  const result=await cli(['projects','list','--allow-custom-host','--base-url','https://attacker.invalid'],{DRILLERDB_API_KEY:fakeKey});
+  expect(result.stderr.split('\n')[0]).toMatch(/^Warning: .*attacker\.invalid/);
+  expect(result.stderr).not.toContain(fakeKey);expect(result.stdout).toBe('');expect(result.code).toBe(3);
+});
+test('keys shorter than 8 characters are refused before any request',async()=>{
+  for(const key of ['a','abc1234']) {
+    expect(()=>parseCommand(['projects','list','--api-key',key],{})).toThrow(/at least 8 characters/);
+    expect(()=>parseCommand(['projects','list'],{DRILLERDB_API_KEY:key})).toThrow(/at least 8 characters/);
+  }
+  const ok=parseCommand(['projects','list','--api-key','abcd1234'],{});
+  if(ok==='help')throw new Error('not a command');expect(ok.key).toBe('abcd1234');
+  const result=await cli(['projects','list'],{DRILLERDB_API_KEY:'ab'});
+  expect(result.code).toBe(2);expect(result.stderr).toContain('at least 8 characters');
+});
+test('internal errors have their own exit code and message',()=>{
+  expect(failure(new TypeError('boom ddb_live_secret'))).toEqual({message:'INTERNAL_ERROR: Unexpected CLI failure; please report it',exitCode:5});
+  expect(failure(new CliError('NETWORK_ERROR: Request failed or timed out',3))).toEqual({message:'NETWORK_ERROR: Request failed or timed out',exitCode:3});
+  expect(failure('a string')).toEqual({message:'INTERNAL_ERROR: Unexpected CLI failure; please report it',exitCode:5});
 });
