@@ -11,7 +11,7 @@ npm install -g drillerdb
 drillerdb --help
 ```
 
-Requires Node 18.3 or newer (`node:util.parseArgs` was introduced in 18.3). For a local build before publication, use `npm ci`, `npm run build`, then `node dist/cli.js --help`. Development tests use `npm test` (Hive lanes must run the test runner through their assigned node suite slot).
+Requires Node 18.7 or newer (`node:util.parseArgs` token output, used to reject duplicate options, was introduced in 18.7). For a local build before publication, use `npm ci`, `npm run build`, then `node dist/cli.js --help`. Development tests use `npm test` (Hive lanes must run the test runner through their assigned node suite slot).
 
 ## Public commands
 

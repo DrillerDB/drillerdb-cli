@@ -3,11 +3,30 @@
   "version": "0.1.0",
   "description": "Read-only DrillerDB partner API and free well-depth and license lookups",
   "type": "module",
-  "bin": { "drillerdb": "dist/cli.js" },
-  "engines": { "node": ">=18.3.0" },
-  "files": ["dist", "README.md", "LICENSE"],
-  "scripts": { "build": "tsc", "test": "vitest run --maxWorkers=2", "prepack": "npm run build" },
-  "repository": { "type": "git", "url": "git+https://github.com/DrillerDB/drillerdb-cli.git" },
+  "bin": {
+    "drillerdb": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=18.7.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run --maxWorkers=2",
+    "prepack": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrillerDB/drillerdb-cli.git"
+  },
   "license": "MIT",
-  "devDependencies": { "@types/node": "18.19.130", "typescript": "6.0.3", "vitest": "3.2.7" }
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "typescript": "6.0.3",
+    "vitest": "3.2.7"
+  }
 }
