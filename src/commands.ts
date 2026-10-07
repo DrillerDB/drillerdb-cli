@@ -5,6 +5,8 @@ export class CliError extends Error {
 }
 export const PUBLIC_BASE = 'https://drillerdb.com';
 export const PARTNER_BASE = 'https://console.drillerdb.com/api/partner/v1';
+// The only hosts that serve the partner API: the console API and the classic app API.
+export const KEY_HOSTS = ['console.drillerdb.com', 'app.drillerdb.com'];
 export const HELP = `drillerdb - read-only DrillerDB API CLI
 
 Public commands (no key):
@@ -25,15 +27,22 @@ Documentation:
   openapi [--partner] [--document]
 Global options:
   --base-url <url> (DRILLERDB_BASE_URL), --format json|table, --no-retry, --help
+  --allow-custom-host: send the API key to a host other than console.drillerdb.com
+  or app.drillerdb.com (prints a warning)
 JSON is the default. All network requests are GETs. Exit codes: 0 success,
-1 API/protocol error, 2 usage, 3 network, 4 rate limited.
+1 API/protocol error, 2 usage, 3 network, 4 rate limited, 5 internal error.
 `;
 const strings = ['lat','lng','state','name','license','zip','radius','limit','cursor','updated-since','api-key','base-url','format'];
-const booleans = ['all','partner','document','no-retry','help'];
-const globalOptions = ['api-key','base-url','format','no-retry','help'];
+const booleans = ['all','partner','document','no-retry','help','allow-custom-host'];
+const globalOptions = ['api-key','base-url','format','no-retry','help','allow-custom-host'];
 type Values = Record<string, string | boolean | undefined>;
 export interface Command {
-  url: URL; key?: string; format: 'json'|'table'; all: boolean; retry: boolean; specUrlOnly: boolean;
+  url: URL; key?: string; format: 'json'|'table'; all: boolean; retry: boolean; specUrlOnly: boolean; warning?: string;
+}
+const INTERNAL = 'INTERNAL_ERROR: Unexpected CLI failure; please report it';
+/** Maps any thrown value to the stderr text and exit code; unknown failures never echo their message. */
+export function failure(error: unknown): {message: string; exitCode: number} {
+  return error instanceof CliError ? {message: error.message, exitCode: error.exitCode} : {message: INTERNAL, exitCode: 5};
 }
 function usage(message: string): never { throw new CliError(message, 2); }
 function required(v: Values, name: string): string {
@@ -124,10 +133,20 @@ export function parseCommand(args: string[], env: NodeJS.ProcessEnv): Command | 
   try {base=new URL(String(v['base-url']??env.DRILLERDB_BASE_URL??(partner?PARTNER_BASE:PUBLIC_BASE)));}
   catch {usage('Invalid base URL');}
   if(base.username || base.password || base.search || base.hash) usage('Base URL must not contain credentials, query or fragment');
-  if(base.protocol!=='https:' && !(base.protocol==='http:' && ['localhost','127.0.0.1','[::1]'].includes(base.hostname)))
+  const loopback=['localhost','127.0.0.1','[::1]'].includes(base.hostname);
+  if(base.protocol!=='https:' && !(base.protocol==='http:' && loopback))
     usage('Base URL requires HTTPS (HTTP is allowed only on loopback for testing)');
   const url=new URL(base.toString());url.pathname=base.pathname.replace(/\/$/,'')+route;url.search=query.toString();
   const key=partner && p[0]!=='openapi'?String(v['api-key']??env.DRILLERDB_API_KEY??''):undefined;
   if(partner && p[0]!=='openapi' && !key) usage('Partner commands require DRILLERDB_API_KEY or --api-key');
-  return {url,key,format,all,retry:!v['no-retry'],specUrlOnly};
+  // Redaction masks the key everywhere in output, so a very short key would blank ordinary text.
+  if(key!==undefined && key.length<8) usage('The API key must have at least 8 characters');
+  // A base URL from a poisoned environment must not receive the key.
+  let warning: string|undefined;
+  if(key!==undefined && !loopback && !KEY_HOSTS.includes(base.hostname)) {
+    if(!v['allow-custom-host'])
+      usage(`Refusing to send the API key to ${base.hostname}: keyed commands call ${KEY_HOSTS.join(' or ')} only. Pass --allow-custom-host to override.`);
+    warning=`Warning: sending the API key to ${base.hostname} because --allow-custom-host is set.`;
+  }
+  return {url,key,format,all,retry:!v['no-retry'],specUrlOnly,warning};
 }
