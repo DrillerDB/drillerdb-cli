@@ -91,7 +91,7 @@ The public site has a shared 500-request-per-IP minute limit. Partner limits are
 
 During `--all`, a `RateLimit` policy with remaining `r` at or below 5 slows the next page according to its reset time `t`, using the longest delay across policies. Waits over 30 seconds exit 4 without partial output. If the server does not send these fields, pagination continues without this pacing; 429 handling still applies. Requests time out after 20 seconds.
 
-API failures include `error.code`, `error.message`, an available hint and `meta.request_id` on stderr. Non-JSON responses and refused redirects are API/protocol errors. Network error text does not include the requested URL or headers.
+API failures include `error.code`, `error.message`, an available hint and `meta.request_id` on stderr. Non-JSON responses and refused redirects are API/protocol errors. Network error text does not include the requested URL or headers. Output is display-safe: table cells and error text replace control, bidi and other format characters with a space, and JSON output writes them as `\u` escapes, so `JSON.parse` still returns the original data.
 
 | Exit | Meaning |
 | --- | --- |
