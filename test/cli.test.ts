@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { parseCommand, CliError, failure } from '../src/commands.js';
-import { redact, retryDelay, rateDelay, table } from '../src/client.js';
+import { printable, redact, retryDelay, rateDelay, safeJson, table } from '../src/client.js';
 
 type Reply={status?:number;body?:unknown;headers?:Record<string,string>;raw?:string};
 type Request={url:string;method:string;key:string|undefined;time:number};
@@ -228,4 +228,45 @@ test('internal errors have their own exit code and message',()=>{
   expect(failure(new TypeError('boom ddb_live_secret'))).toEqual({message:'INTERNAL_ERROR: Unexpected CLI failure; please report it',exitCode:5});
   expect(failure(new CliError('NETWORK_ERROR: Request failed or timed out',3))).toEqual({message:'NETWORK_ERROR: Request failed or timed out',exitCode:3});
   expect(failure('a string')).toEqual({message:'INTERNAL_ERROR: Unexpected CLI failure; please report it',exitCode:5});
+});
+test('loopback means the exact loopback names, not lookalikes',()=>{
+  for(const base of ['https://localhost.evil.example','https://localhostx','https://127.0.0.1.evil.example'])
+    expect(()=>parseCommand(['projects','list','--base-url',base],{DRILLERDB_API_KEY:fakeKey})).toThrow(/--allow-custom-host/);
+});
+test('an unexpected failure exits 5 end to end with the fixed message',async()=>{
+  await mock(async(base)=>{
+    const result=await cli(['stats','--base-url',base]);
+    expect(result.code).toBe(5);expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('INTERNAL_ERROR: Unexpected CLI failure; please report it\n');
+  },()=>({raw:'['.repeat(200000)+']'.repeat(200000)}));
+});
+const tricky='a\u200eb\u200fc\u202ed\u2066e\u061cf\u200bg\u2028h\u2029i\u007fj\u009bk';
+test('JSON output escapes format, bidi and line-separator characters but keeps the data',async()=>{
+  await mock(async(base)=>{
+    const result=await cli(['stats','--base-url',base]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toMatch(/[\u007f-\u009f\u2028\u2029\p{Cf}]/u);
+    expect(JSON.parse(result.stdout)).toEqual({name:tricky});
+  },()=>({body:{name:tricky}}));
+});
+test('table output removes every format and separator character',()=>{
+  expect(table({data:[{name:tricky}]})).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u);
+});
+test('API error text on stderr is display-safe',async()=>{
+  await mock(async(base)=>{
+    const result=await cli(['stats','--base-url',base]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u);
+    expect(result.stderr).toContain('BAD_REQUEST: x [2J y');
+  },()=>({status:400,body:{error:{code:'BAD_REQUEST',message:'x\u001b[2J\u202ey',hint:'h\u0007'},meta:{request_id:'r\u2028q'}}}));
+});
+test('a refused short key prints the refusal sentence intact',async()=>{
+  const result=await cli(['projects','list'],{DRILLERDB_API_KEY:'a'});
+  expect(result.code).toBe(2);expect(result.stderr).toBe('The API key must have at least 8 characters\n');
+});
+test('a key with format characters is masked in its escaped and sanitized forms',()=>{
+  const odd='ddb_test_\u202eSYNTHETIC_KEY_VALUE';
+  for(const out of [safeJson({k:odd}),table({data:[{k:odd}]}),printable(`x ${odd} y`)]) {
+    expect(redact(out,[odd])).not.toContain('SYNTHETIC_KEY_VALUE');
+  }
 });

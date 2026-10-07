@@ -1,13 +1,22 @@
 import { CliError, type Command } from './commands.js';
 
 type ObjectValue = Record<string, unknown>;
+// Characters that can rewrite a terminal display: C0/C1 controls, format characters (bidi, zero-width) and line separators.
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/gu;
+export const printable = (s: string): string => s.replace(UNSAFE, ' ');
+/** Pretty JSON with the same characters written as \u escapes, so JSON.parse returns the original data. */
+export function safeJson(value: unknown): string {
+  return JSON.stringify(value, null, 2).replace(/[\u007f-\u009f\u2028\u2029\p{Cf}]/gu,
+    c => c.split('').map(unit => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0')).join(''));
+}
 function object(value: unknown): ObjectValue {
   return value && typeof value==='object' && !Array.isArray(value)?value as ObjectValue:{};
 }
 export function redact(text: string, keys: string[]): string {
   for(const key of keys.filter(Boolean).sort((a,b)=>b.length-a.length)) {
     const mask=key.length>8 && /^[A-Za-z0-9_-]{4}/.test(key)?`${key.slice(0,4)}[REDACTED]`:'[REDACTED]';
-    for(const form of new Set([key,encodeURIComponent(key),JSON.stringify(key).slice(1,-1)]))
+    // Every form a key can take in output: raw, URL-encoded, JSON-escaped, safe-JSON-escaped and display-sanitized.
+    for(const form of new Set([key,encodeURIComponent(key),JSON.stringify(key).slice(1,-1),safeJson(key).slice(1,-1),printable(key)]))
       text=text.split(form).join(mask);
   }
   return text;
@@ -29,8 +38,9 @@ export function rateDelay(header: string|null): number {
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 function apiError(status:number, payload:unknown):CliError {
   const body=object(payload), error=object(body.error), meta=object(body.meta);
-  const code=error.code??`HTTP_${status}`, message=error.message??(typeof body.error==='string'?body.error:`API returned HTTP ${status}`);
-  const hint=error.hint??body.hint, requestId=meta.request_id;
+  const text=(v:unknown)=>v===undefined || v===null?undefined:printable(String(v));
+  const code=text(error.code)??`HTTP_${status}`, message=text(error.message)??(typeof body.error==='string'?printable(body.error):`API returned HTTP ${status}`);
+  const hint=text(error.hint??body.hint), requestId=text(meta.request_id);
   return new CliError(`${code}: ${message}${hint?`\nHint: ${hint}`:''}${requestId?`\nrequest_id: ${requestId}`:''}`, status===429?4:1);
 }
 async function get(command:Command):Promise<{payload:unknown;rate:string|null}> {
@@ -91,8 +101,6 @@ export function table(payload:unknown):string {
   const records:ObjectValue[]=rows.map(value=>value && typeof value==='object' && !Array.isArray(value)?value as ObjectValue:{value});
   const columns=[...new Set(records.flatMap(row=>Object.keys(row)))];
   const cell=(v:unknown)=>v===null || v===undefined?'':typeof v==='object'?JSON.stringify(v):String(v);
-  // API strings may carry terminal control or bidi override characters that rewrite the display.
-  const printable=(s:string)=>s.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,' ');
   const matrix=[columns.map(printable),...records.map(row=>columns.map(col=>printable(cell(row[col]))))];
   const widths=columns.map((_,i)=>matrix.reduce((width,row)=>Math.max(width,row[i].length),0));
   return matrix.map(row=>row.map((s,i)=>s.padEnd(widths[i])).join('  ').trimEnd()).join('\n')+'\n';
