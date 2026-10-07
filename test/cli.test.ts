@@ -178,3 +178,33 @@ test('default partner/public hosts and string equipment IDs match the contract',
   expect(partner.url.href).toBe('https://console.drillerdb.com/api/partner/v1/equipment/rig-A');
   expect(()=>parseCommand(['stats','--base-url','https://example.com?key=hidden'],{})).toThrow(CliError);
 });
+test('keyed commands send the key only to drillerdb.com hosts unless --allow-custom-host',()=>{
+  const refused=(args:string[],env:Record<string,string>)=>{
+    try {parseCommand(args,env);} catch(error) {
+      expect(error).toBeInstanceOf(CliError);expect((error as CliError).exitCode).toBe(2);
+      expect((error as CliError).message).not.toContain(fakeKey);return (error as CliError).message;
+    }
+    throw new Error(`accepted ${args.join(' ')}`);
+  };
+  for(const base of ['https://attacker.example.net/x','https://evildrillerdb.com','https://drillerdb.com.evil.example','https://drillerdb.com.'])
+    expect(refused(['projects','list','--api-key',fakeKey,'--base-url',base],{})).toContain('--allow-custom-host');
+  expect(refused(['contacts','get','4'],{DRILLERDB_API_KEY:fakeKey,DRILLERDB_BASE_URL:'https://attacker.example.net'})).toContain('attacker.example.net');
+  for(const base of ['https://drillerdb.com','https://app.drillerdb.com/api/v1','https://console.drillerdb.com/api/partner/v1','http://127.0.0.1:9']) {
+    const command=parseCommand(['projects','list','--base-url',base],{DRILLERDB_API_KEY:fakeKey});
+    if(command==='help')throw new Error('not a command');expect(command.key).toBe(fakeKey);
+  }
+  const custom=parseCommand(['projects','list','--base-url','https://attacker.example.net','--allow-custom-host'],{DRILLERDB_API_KEY:fakeKey});
+  if(custom==='help')throw new Error('not a command');expect(custom.url.hostname).toBe('attacker.example.net');
+  const keyless=parseCommand(['stats','--base-url','https://example.org'],{DRILLERDB_API_KEY:fakeKey});
+  if(keyless==='help')throw new Error('not a command');expect(keyless.key).toBeUndefined();
+});
+test('a refused custom host makes no request and prints no key',async()=>{
+  const result=await cli(['projects','list'],{DRILLERDB_API_KEY:fakeKey,DRILLERDB_BASE_URL:'https://attacker.example.net'});
+  expect(result.code).toBe(2);expect(result.stdout).toBe('');
+  expect(result.stderr).toContain('--allow-custom-host');expect(result.stderr).not.toContain(fakeKey);
+});
+test('table output removes terminal control and bidi override characters',()=>{
+  const out=table({data:[{'na\x1b]0;x\x07me':'a\x1b[2Jb\u202ec\x9bd\u2066e'}]});
+  expect(out).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/);
+  expect(out).toContain('a [2Jb c d e');
+});

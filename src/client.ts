@@ -91,7 +91,9 @@ export function table(payload:unknown):string {
   const records:ObjectValue[]=rows.map(value=>value && typeof value==='object' && !Array.isArray(value)?value as ObjectValue:{value});
   const columns=[...new Set(records.flatMap(row=>Object.keys(row)))];
   const cell=(v:unknown)=>v===null || v===undefined?'':typeof v==='object'?JSON.stringify(v):String(v);
-  const matrix=[columns,...records.map(row=>columns.map(col=>cell(row[col]).replace(/[\r\n\t]/g,' ')))];
+  // API strings may carry terminal control or bidi override characters that rewrite the display.
+  const printable=(s:string)=>s.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,' ');
+  const matrix=[columns.map(printable),...records.map(row=>columns.map(col=>printable(cell(row[col]))))];
   const widths=columns.map((_,i)=>matrix.reduce((width,row)=>Math.max(width,row[i].length),0));
   return matrix.map(row=>row.map((s,i)=>s.padEnd(widths[i])).join('  ').trimEnd()).join('\n')+'\n';
 }

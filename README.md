@@ -39,7 +39,7 @@ The default partner base is `https://console.drillerdb.com/api/partner/v1`. The 
 drillerdb projects list --base-url https://app.drillerdb.com/api/v1
 ```
 
-`--base-url` overrides `DRILLERDB_BASE_URL`, which overrides the command's default host. A custom base applies to the selected command; use an origin without `/api/partner/v1` for public lookups. HTTPS is required; HTTP is accepted only on loopback for local tests. Base URLs cannot contain credentials, queries or fragments. Redirects are refused to prevent forwarding a key to another endpoint.
+`--base-url` overrides `DRILLERDB_BASE_URL`, which overrides the command's default host. A custom base applies to the selected command; use an origin without `/api/partner/v1` for public lookups. HTTPS is required; HTTP is accepted only on loopback for local tests. Base URLs cannot contain credentials, queries or fragments. Redirects are refused to prevent forwarding a key to another endpoint. Partner commands send the key only to drillerdb.com and its subdomains (or loopback for tests); any other host is refused unless you also pass `--allow-custom-host`, so a wrong or planted `DRILLERDB_BASE_URL` cannot receive the key.
 
 ## Partner commands
 
